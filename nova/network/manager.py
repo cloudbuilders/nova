@@ -884,7 +884,7 @@ class NetworkManager(manager.SchedulerDependentManager):
         rxtx_factor = kwargs['rxtx_factor']
         requested_networks = kwargs.get('requested_networks')
         vpn = kwargs['vpn']
-        admin_context = context.elevated()
+        admin_ctx = context.elevated()
         LOG.debug(_("network allocations for instance |%s|"), instance_id,
                                                             context=context)
         networks = self._get_networks_for_instance(admin_context,

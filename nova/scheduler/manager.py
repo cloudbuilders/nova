@@ -77,7 +77,7 @@ class SchedulerManager(manager.Manager):
         """Tries to call schedule_* method on the driver to retrieve host.
         Falls back to schedule(context, topic) if method doesn't exist.
         """
-        driver_method_name = 'schedule_%s' % method
+        driver_method_name = 'schedule%s' % method
         try:
             driver_method = getattr(self.driver, driver_method_name)
             args = (context,) + args

@@ -415,7 +415,7 @@ class ComputeManager(manager.SchedulerDependentManager):
         """Launch a new instance with specified options."""
         context = context.elevated()
         try:
-            instance = self.db.instance_get_by_uuid(context, instance_uuid)
+            instance = self.db.instance_get_by_uid(context, instance_uuid)
             self._check_instance_not_already_created(context, instance)
             image_meta = self._check_image_size(context, instance)
             self._start_building(context, instance)

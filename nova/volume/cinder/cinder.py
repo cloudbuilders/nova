@@ -37,21 +37,23 @@ FLAGS = flags.FLAGS
 
 CinderClient = importutils.import_class('cinder.client.Client')
 
-def _create_cinder_client(volume_href):
-    pass
-
-def _parse_volume_ref(volume_href):
-    pass
-
+def _create_cinder_client(context, host, port):
+    if FLAGS.auth_strategy == 'keystone':
+        creds = {'strategy': 'keystone',
+                 'username': context.user_id,
+                 'tenant': context.project_id}
+        cinder_client = CinderClient(host, port,
+                                     auth_tok=context.auth_token,
+                                     creds=creds)
+    else:
+        cinder_client = CinderClient(host, port)
 
 
 def pick_cinder_api_server():
     """Return which Cinder API server to use for the request
+    (poor mans scheduler)
 
-    This is very simplistic and should be replaced by a real load
-    balancer in production environments.
-
-        Returns: host, port
+    :Returns: host, port
     """
     host_port = random.choice(FLAGS.cinder_api_servers)
     (host, port_str) = host_port.split(':')
@@ -59,38 +61,10 @@ def pick_cinder_api_server():
     return (host, port)
 
 
-def get_cinder_client(context, volume_href):
-    """Get the correct cinder client and id for the given volume_href.
-
-    The volume_href param can be an href of the form
-    http://mycinderserver:9292/images/42, or just an int such as 42. If the
-    volume_href is an int, then flags are used to create the default
-    cinder client.
-
-    :param volume_href: image ref/id for an image
-    :returns: a tuple of the form (cinder_client, image_id)
-
-    """
+def get_cinder_client(context):
+    """Get and return the appropriate cinderclient to use."""
     cinder_host, cinder_port = pick_cinder_api_server()
-
-    # check if this is an id
-    if '/' not in str(volume_href):
-        cinder_client = _create_cinder_client(context,
-                                              cinder_host,
-                                              cinder_port)
-        return (cinder_client, volume_href)
-
-    else:
-        try:
-            (image_id, cinder_host, cinder_port) =\
-                    _parse_volume_ref(volume_href)
-            cinder_client = _create_cinder_client(context,
-                                                  cinder_host,
-                                                  cinder_port)
-        except ValueError:
-            raise exception.InvalidVolumeRef(volume_href=volume_href)
-
-        return (cinder_client, image_id)
+    return _create_cinder_client(context, cinder_host, cinder_port)
 
 
 class CinderVolumeService(object):
@@ -100,9 +74,6 @@ class CinderVolumeService(object):
         self._client = client
 
     def _get_client(self, context):
-        # NOTE(sirp): we want to load balance each request across cinder
-        # servers. Since CinderVolumeService is a long-lived object, `client`
-        # is made to choose a new server each time via this property.
         if self._client is not None:
             return self._client
         cinder_host, cinder_port = pick_cinder_api_server()

@@ -355,16 +355,21 @@ class _API(base.Base):
         return None
 
 
-def cinderclient(context):
-    LOG.debug('cinderclient connection created using token "%s" and url "%s"' %
-              (request.user.token, url_for(request, 'volume')))
+from cinderclient.v1 import client as cinder_client
+from cinderclient import exceptions as exc
 
+
+def cinderclient(context):
     # FIXME!!!  Get the proper url from keystone!!!
-    url = "http://127.0.0.1:8776/v1/"
-    c = nova_client.Client(context.auth_user,
-                           context.auth_token,
-                           project_id=context.project_id,
-                           auth_url=url)
+    url = "http://127.0.0.1:8776/v1/" + context.project_id
+
+    LOG.debug('cinderclient connection created using token "%s" and url "%s"' %
+              (context.auth_token, url))
+
+    c = cinder_client.Client(context.user_id,
+                             context.auth_token,
+                             project_id=context.project_id,
+                             auth_url=url)
     c.client.auth_token = context.auth_token
     c.client.management_url = url
     return c
@@ -374,30 +379,29 @@ def _untranslate_volume_summary_view(context, vol):
     """Maps keys for volumes summary view."""
     d = {}
 
-    d['id'] = vol['id']
-    d['status'] = vol['status']
-    d['size'] = vol['size']
-    d['availability_zone'] = vol['availabilityZone']
-    d['created_at'] = vol['createdAt']
+    d['id'] = vol.id
+    d['status'] = vol.status
+    d['size'] = vol.size
+    d['availability_zone'] = vol.availability_zone
+    d['created_at'] = vol.created_at
 
-    if vol['attachments'][0]:
-        att = vol['attachments'][0]
-        d['attach_status'] = 'attached'
-        d['instance_uuid'] = att['serverId']
-        d['mountpoint'] = d.get('device')
+    if vol.attachments:
+        att = vol.attachments[0]
+        d.attach_status = 'attached'
+        d.instance_uuid = att['server_id']
+        d.mountpoint = vol.device
     else:
          d['attach_status'] = 'detached'
 
-    d['display_name'] = vol['displayName']
-    d['display_description'] = vol['displayDescription']
+    d['display_name'] = vol.display_name
+    d['display_description'] = vol.display_description
     
     # FIXME: Information may be lost in this translation
-    d['volume_type_id'] = vol['volumeType']
-    d['snapshot_id'] = vol['snapshotId']
-    LOG.audit(_("vol=%s"), vol, context=context)
+    d['volume_type_id'] = vol.volume_type
+    d['snapshot_id'] = vol.snapshot_id
 
     d['vol_metadata'] = []
-    for k, v in vol['metadata']:
+    for k, v in vol.metadata:
         item = {}
         item['key'] = k
         item['value'] = v
@@ -550,49 +554,29 @@ class API(base.Base):
 
     @wrap_check_policy
     def reserve_volume(self, context, volume):
-        self.update(context, volume, {"status": "attaching"})
+        cinderclient(context).volumes.reserve(volume['id'])
 
     @wrap_check_policy
     def unreserve_volume(self, context, volume):
-        if volume['status'] == "attaching":
-            self.update(context, volume, {"status": "available"})
+        cinderclient(context).volumes.reserve(volume['id'])
 
     @wrap_check_policy
     def attach(self, context, volume, instance_uuid, mountpoint):
-        host = volume['host']
-        queue = self.db.queue_get_for(context, FLAGS.volume_topic, host)
-        return rpc.call(context, queue,
-                        {"method": "attach_volume",
-                         "args": {"volume_id": volume['id'],
-                                  "instance_uuid": instance_uuid,
-                                  "mountpoint": mountpoint}})
+        cinderclient(context).volumes.attach(volume['id'], instance_uuid, mountpoint)
 
     @wrap_check_policy
     def detach(self, context, volume):
-        host = volume['host']
-        queue = self.db.queue_get_for(context, FLAGS.volume_topic, host)
-        return rpc.call(context, queue,
-                 {"method": "detach_volume",
-                  "args": {"volume_id": volume['id']}})
+        cinderclient(context).volumes.attach(volume['id'])
 
     @wrap_check_policy
     def initialize_connection(self, context, volume, connector):
-        host = volume['host']
-        queue = self.db.queue_get_for(context, FLAGS.volume_topic, host)
-        return rpc.call(context, queue,
-                        {"method": "initialize_connection",
-                         "args": {"volume_id": volume['id'],
-                                  "connector": connector}})
+        return cinderclient(context).\
+                 volumes.initialize_connection(volume['id'], connector)
 
     @wrap_check_policy
     def terminate_connection(self, context, volume, connector):
-        self.unreserve_volume(context, volume)
-        host = volume['host']
-        queue = self.db.queue_get_for(context, FLAGS.volume_topic, host)
-        return rpc.call(context, queue,
-                        {"method": "terminate_connection",
-                         "args": {"volume_id": volume['id'],
-                                  "connector": connector}})
+        return cinderclient(context).\
+                 volumes.terminate_connection(volume['id'], connector)
 
     def _create_snapshot(self, context, volume, name, description,
                          force=False):
